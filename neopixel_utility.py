@@ -2,55 +2,39 @@ import logging
 from colour import Color
 import random
 import math
+from neopixel import PrinterNeoPixel
 
 GAMMA_TABLE_STEPS=100
 
-class NeopixelUtility:
+class NeopixelUtility(PrinterNeoPixel):
     def __init__(self, config):
-        self.printer = config.get_printer()
-        self.name = config.get_name().split()[1]
-        self.gcode = self.printer.lookup_object('gcode')
-        self.mutex = self.printer.get_reactor().mutex()
+        PrinterNeoPixel.__init__(self, config)
+        name = config.get_name().split()[1]
+        gcode = self.printer.lookup_object('gcode')
         self.reactor = self.printer.get_reactor()
-        self.neopixel_name = config.get('pixels').replace('"','')
-        self.gamma = config.getfloat('gamma', 2.7, minval=0.1)
-        self.gamma_table = self._gamma_table(GAMMA_TABLE_STEPS, self.gamma)
-        logging.info("Neopixel animator: Looking for neopixels named: {0}".format("neopixel {0}".format(self.neopixel_name)))
-        neopixels = None
-        for objname, obj in self.printer.lookup_objects("neopixel"):
-            logging.info(objname)
-            if objname == "neopixel {0}".format(self.neopixel_name):
-                logging.info('Found {0}'.format(objname))
-                neopixels = obj
-        if neopixels is None:
-            msg = 'neopixe_animations configuration error: Could not find configuration entry "neopixel {0}"'.format(self.neopixel_name)
-            logging.error(msg)
-            raise config.error(msg)
-        else:
-            self.neopixels = neopixels
 
-        self.gcode.register_mux_command(
-            "NEO_ANIM", "ANIM", self.name,
-            self.cmd_NEO_ANIM,
-            desc=self.cmd_NEO_ANIM_help)
-        self.gcode.register_mux_command(
-            "NEO_BLINK", "ANIM", self.name,
-            self.cmd_NEO_BLINK)
-        self.gcode.register_mux_command(
-            "NEO_RANDO", "ANIM", self.name,
-            self.cmd_NEO_RANDO)
-        self.gcode.register_mux_command(
-            "NEO_GRADIENT", "ANIM", self.name,
-            self.cmd_NEO_GRADIENT)
+        gcode.register_mux_command(
+            "SET_LED_ANIM", "LED", name,
+            self.cmd_SET_LED_ANIM,
+            desc=self.cmd_SET_LED_ANIM_help)
+        gcode.register_mux_command(
+            "SET_LED_BLINK", "LED", name,
+            self.cmd_SET_LED_BLINK)
+        gcode.register_mux_command(
+            "SET_LED_RANDO", "LED", name,
+            self.cmd_SET_LED_RANDO)
+        gcode.register_mux_command(
+            "SET_LED_GRADIENT", "LED", name,
+            self.cmd_SET_LED_GRADIENT)
 
     # Copied relevant parts from neopixels SET_LED cmd
     def _set_neopixels(self, red, green, blue, white=1., index=None, transmit=True):
         def reactor_bgfunc(print_time):
             with self.mutex:
                 #logging.info("Setting: {0} {1} {2}".format(red, green, blue))
-                self.neopixels.update_color_data(red, green, blue, white, index)
+                self.update_color_data(red, green, blue, white, index)
                 if transmit:
-                    self.neopixels.send_data(print_time)
+                    self.send_data(print_time)
         def lookahead_bgfunc(print_time):
             self.reactor.register_callback(lambda et: reactor_bgfunc(print_time))
 
@@ -73,39 +57,39 @@ class NeopixelUtility:
         while eventtime < end:
             eventtime = self.reactor.pause(eventtime + .05)
 
-    def cmd_NEO_BLINK(self, params):
-        #current_color_data = self.neopixels.get_status(None)['color_data']
+    def cmd_SET_LED_BLINK(self, params):
+        #current_color_data = self.get_status(None)['color_data']
         self._set_neopixels(1.,1.,0.)
-        logging.info(self.neopixels.get_status(None)['color_data'])
-        logging.info(self.neopixels.get_status(None)['color_data'])
+        logging.info(self.get_status(None)['color_data'])
+        logging.info(self.get_status(None)['color_data'])
         logging.info('pause in')
         self._pause(1.)
-        logging.info(self.neopixels.get_status(None)['color_data'])
+        logging.info(self.get_status(None)['color_data'])
         logging.info('pause out')
         self._set_neopixels(0.,1.,0.)
-        logging.info(self.neopixels.get_status(None)['color_data'])
+        logging.info(self.get_status(None)['color_data'])
         self._pause(1)
-        for i in range(1,self.neopixels.chain_count):
+        for i in range(1,self.chain_count):
             #logging.info("{0} {1}".format(i, colour))
-            #self.neopixels.update_color_data(random.random(), random.random(), random.random(), 0., i)
+            #self.update_color_data(random.random(), random.random(), random.random(), 0., i)
             self._set_neopixels(random.random(),random.random(),random.random(),index=i, transmit=False)
-        logging.info(self.neopixels.get_status(None)['color_data'])
-        self._set_neopixels(1.,1.,1.,index=self.neopixels.chain_count)
-        logging.info(self.neopixels.get_status(None)['color_data'])
+        logging.info(self.get_status(None)['color_data'])
+        self._set_neopixels(1.,1.,1.,index=self.chain_count)
+        logging.info(self.get_status(None)['color_data'])
 
-    def cmd_NEO_GRADIENT(self, params):
-        for i in range(1,self.neopixels.chain_count):
-            linear_gradient = float(i) / self.neopixels.chain_count
+    def cmd_SET_LED_GRADIENT(self, params):
+        for i in range(1,self.chain_count):
+            linear_gradient = float(i) / self.chain_count
             self._set_neopixels(*self._gamma_convert(Color(rgb=(linear_gradient,linear_gradient,linear_gradient))).rgb,index=i, transmit=False)
-        self._set_neopixels(1.,1.,1.,index=self.neopixels.chain_count)
+        self._set_neopixels(1.,1.,1.,index=self.chain_count)
 
-    def cmd_NEO_RANDO(self, params):
-        for i in range(1,self.neopixels.chain_count):
+    def cmd_SET_LED_RANDO(self, params):
+        for i in range(1,self.chain_count):
             self._set_neopixels(random.random(),random.random(),random.random(),index=i, transmit=False)
-        self._set_neopixels(1.,1.,1.,index=self.neopixels.chain_count)
+        self._set_neopixels(1.,1.,1.,index=self.chain_count)
 
-    cmd_NEO_ANIM_help = "Run an animation"
-    def cmd_NEO_ANIM(self, params):
+    cmd_SET_LED_ANIM_help = "Run an animation"
+    def cmd_SET_LED_ANIM(self, params):
         # Parameters:
         # - GAMMA Default to 2, unless specified or defined already in config
         # - GAMMA_ADJUST Default to TRUE, unless specified or defined already in config
@@ -127,7 +111,7 @@ class NeopixelUtility:
         self.gcode.respond_info("this is a test")
 
         # ['__doc__', '__init__', '__module__', 'build_config', 'chain_count', 'cmd_SET_LED', 'cmd_SET_LED_help', 'color_data', 'color_order', 'get_status', 'mcu', 'mutex', 'neopixel_send_cmd', 'neopixel_update_cmd', 'oid', 'old_color_data', 'pin', 'printer', 'send_data', 'update_color_data']
-        #logging.info(self.neopixels.get_status(None)['color_data'])
+        #logging.info(self.get_status(None)['color_data'])
         logging.info(params)
         logging.debug("Debug")
         pass
