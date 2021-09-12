@@ -2,44 +2,109 @@ import logging
 from colour import Color
 import random
 import math
+import collections
 from neopixel import PrinterNeoPixel
 
+
 GAMMA_TABLE_STEPS=100
+Pattern = collections.namedtuple('Pattern','name function')
 
 class NeopixelUtility(PrinterNeoPixel):
     def __init__(self, config):
         PrinterNeoPixel.__init__(self, config)
         name = config.get_name().split()[1]
-        gcode = self.printer.lookup_object('gcode')
+        self.gcode = self.printer.lookup_object('gcode')
         self.reactor = self.printer.get_reactor()
 
-        gcode.register_mux_command(
-            "SET_LED_ANIM", "LED", name,
-            self.cmd_SET_LED_ANIM,
-            desc=self.cmd_SET_LED_ANIM_help)
-        gcode.register_mux_command(
-            "SET_LED_BLINK", "LED", name,
-            self.cmd_SET_LED_BLINK)
-        gcode.register_mux_command(
-            "SET_LED_RANDO", "LED", name,
-            self.cmd_SET_LED_RANDO)
-        gcode.register_mux_command(
-            "SET_LED_GRADIENT", "LED", name,
-            self.cmd_SET_LED_GRADIENT)
+        self.gamma = config.get('gamma', 2.7)
+        self.gamma_adjust = config.getboolean('gamma_adjust', True)
+        self.gamma_table = self._gamma_table(GAMMA_TABLE_STEPS, self.gamma)
 
-    # Copied relevant parts from neopixels SET_LED cmd
-    def _set_neopixels(self, red, green, blue, white=1., index=None, transmit=True):
-        def reactor_bgfunc(print_time):
-            with self.mutex:
-                #logging.info("Setting: {0} {1} {2}".format(red, green, blue))
-                self.update_color_data(red, green, blue, white, index)
-                if transmit:
-                    self.send_data(print_time)
-        def lookahead_bgfunc(print_time):
-            self.reactor.register_callback(lambda et: reactor_bgfunc(print_time))
+        self.gcode.register_mux_command(
+            "SET_LED_PATTERN", "LED", name,
+            self.cmd_SET_LED_PATTERN,
+            desc=self.cmd_SET_LED_PATTERN_help)
 
-        # No sync - just do it
-        lookahead_bgfunc(None)
+        self.gcode.register_mux_command(
+            "SET_LED_ANIMATION", "LED", name,
+            self.cmd_SET_LED_ANIMATION,
+            desc=self.cmd_SET_LED_ANIMATION_help)
+
+    # Parameters:
+    # - SPEED Relative speed of animations to base ([0 to 10] -> default 1.)
+    # - TERMINATE Length of time to run before terminating (for looping animations)
+    # - RANGE Allow a subset of pixels to be set?
+
+
+    # Animations (+ Animation Specific Parameters) / Separate into animations and allocations?  What about Rider?
+    # Random
+    # Rainbow
+    # March  Direction, Speed, Steps
+    # Pattern Pattern
+    # Fade
+    # Pulse
+    # Solid Colour
+    # Rider Pattern
+
+    cmd_SET_LED_PATTERN_help = "Set a static pattern for the LEDs"
+    def cmd_SET_LED_PATTERN(self, params):
+        #logging.debug(self.get_status(None)['color_data'])
+        pattern = params.get('PATTERN', 'Unknown')
+        limits = map(int,params.get('RANGE', '1,{0}'.format(self.chain_count)).split(','))
+
+        patterns = [
+            Pattern('Random', self.__pattern_random),
+            Pattern('Gradient', self.__pattern_gradient),
+            Pattern('Custom', self.__pattern_custom)
+        ]
+
+        pattern_list = list(zip(*patterns))[0]
+
+        if pattern not in pattern_list:
+            pattern = 'Random'
+            self.gcode.respond_info(
+                'Using Random pattern.  Please select a pattern using' \
+                ' PATTERN= and pass one of the following'\
+                ' patterns: {}'.format(', '.join(pattern_list)))
+
+        func = [x.function for x in patterns if x.name == pattern][0]
+        logging.debug(pattern)
+        logging.debug(func)
+        func(params, limits)
+
+    cmd_SET_LED_ANIMATION_help = "Start an animation"
+    def cmd_SET_LED_ANIMATION(self, params):
+        pass
+
+    def __pattern_gradient(self, params, limits):
+        ascending = params.get_int('ASCENDING', 1)
+
+        if ascending:
+            for i in range(1,self.chain_count):
+                linear_gradient = float(i) / self.chain_count
+                c = Color(rgb=(linear_gradient,linear_gradient,linear_gradient))
+                if self.gamma_adjust:
+                    self._set_neopixels(*self._gamma_convert(c).rgb,index=i, transmit=False)
+                else:
+                    self._set_neopixels(*c.grb, index=i, transmit=False)
+            self._set_neopixels(1.,1.,1.,index=self.chain_count)
+        else:
+            for i in range(self.chain_count,1,-1):
+                linear_gradient = float(self.chain_count - i + 1) / self.chain_count
+                c = Color(rgb=(linear_gradient,linear_gradient,linear_gradient))
+                if self.gamma_adjust:
+                    self._set_neopixels(*self._gamma_convert(c).rgb,index=i, transmit=False)
+                else:
+                    self._set_neopixels(*c.grb, index=i, transmit=False)
+            self._set_neopixels(1.,1.,1.,index=1)
+
+    def __pattern_random(self, params, limits):
+        for i in range(limits[0],limits[1]):
+            self._set_neopixels(random.random(),random.random(),random.random(),index=i, transmit=False)
+        self._set_neopixels(1.,1.,1.,index=limits[1])
+
+    def __pattern_custom(self, params, limits):
+        pass
 
     def _gamma_lookup(self, number):
         return self.gamma_table[int(round((GAMMA_TABLE_STEPS-1) * number))]
@@ -57,97 +122,19 @@ class NeopixelUtility(PrinterNeoPixel):
         while eventtime < end:
             eventtime = self.reactor.pause(eventtime + .05)
 
-    def cmd_SET_LED_BLINK(self, params):
-        #current_color_data = self.get_status(None)['color_data']
-        self._set_neopixels(1.,1.,0.)
-        logging.info(self.get_status(None)['color_data'])
-        logging.info(self.get_status(None)['color_data'])
-        logging.info('pause in')
-        self._pause(1.)
-        logging.info(self.get_status(None)['color_data'])
-        logging.info('pause out')
-        self._set_neopixels(0.,1.,0.)
-        logging.info(self.get_status(None)['color_data'])
-        self._pause(1)
-        for i in range(1,self.chain_count):
-            #logging.info("{0} {1}".format(i, colour))
-            #self.update_color_data(random.random(), random.random(), random.random(), 0., i)
-            self._set_neopixels(random.random(),random.random(),random.random(),index=i, transmit=False)
-        logging.info(self.get_status(None)['color_data'])
-        self._set_neopixels(1.,1.,1.,index=self.chain_count)
-        logging.info(self.get_status(None)['color_data'])
+    # Copied relevant parts from neopixels SET_LED cmd
+    def _set_neopixels(self, red, green, blue, white=1., index=None, transmit=True):
+        def reactor_bgfunc(print_time):
+            with self.mutex:
+                #logging.info("Setting: {0} {1} {2}".format(red, green, blue))
+                self.update_color_data(red, green, blue, white, index)
+                if transmit:
+                    self.send_data(print_time)
+        def lookahead_bgfunc(print_time):
+            self.reactor.register_callback(lambda et: reactor_bgfunc(print_time))
 
-    def cmd_SET_LED_GRADIENT(self, params):
-        for i in range(1,self.chain_count):
-            linear_gradient = float(i) / self.chain_count
-            self._set_neopixels(*self._gamma_convert(Color(rgb=(linear_gradient,linear_gradient,linear_gradient))).rgb,index=i, transmit=False)
-        self._set_neopixels(1.,1.,1.,index=self.chain_count)
-
-    def cmd_SET_LED_RANDO(self, params):
-        for i in range(1,self.chain_count):
-            self._set_neopixels(random.random(),random.random(),random.random(),index=i, transmit=False)
-        self._set_neopixels(1.,1.,1.,index=self.chain_count)
-
-    cmd_SET_LED_ANIM_help = "Run an animation"
-    def cmd_SET_LED_ANIM(self, params):
-        # Parameters:
-        # - GAMMA Default to 2, unless specified or defined already in config
-        # - GAMMA_ADJUST Default to TRUE, unless specified or defined already in config
-        # - SPEED Relative speed of animations to base ([0 to 10] -> default 1.)
-        # - TERMINATE Length of time to run before terminating (for looping animations)
-
-
-
-        # Animations (+ Animation Specific Parameters) / Separate into animations and allocations?  What about Rider?
-        # Random
-        # Rainbow
-        # March  Direction, Speed, Steps
-        # Pattern Pattern
-        # Fade
-        # Pulse
-        # Solid Colour
-        # Rider Pattern
-
-        self.gcode.respond_info("this is a test")
-
-        # ['__doc__', '__init__', '__module__', 'build_config', 'chain_count', 'cmd_SET_LED', 'cmd_SET_LED_help', 'color_data', 'color_order', 'get_status', 'mcu', 'mutex', 'neopixel_send_cmd', 'neopixel_update_cmd', 'oid', 'old_color_data', 'pin', 'printer', 'send_data', 'update_color_data']
-        #logging.info(self.get_status(None)['color_data'])
-        logging.info(params)
-        logging.debug("Debug")
-        pass
-        # reactor = self.printer.get_reactor()
-        # try:
-        #     proc = subprocess.Popen(
-        #         self.command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        # except Exception:
-        #     logging.exception(
-        #         "shell_command: Command {%s} failed" % (self.name))
-        #     raise self.gcode.error("Error running command {%s}" % (self.name))
-        # if self.verbose:
-        #     self.proc_fd = proc.stdout.fileno()
-        #     self.gcode.respond_info("Running Command {%s}...:" % (self.name))
-        #     hdl = reactor.register_fd(self.proc_fd, self._process_output)
-        # eventtime = reactor.monotonic()
-        # endtime = eventtime + self.timeout
-        # complete = False
-        # while eventtime < endtime:
-        #     eventtime = reactor.pause(eventtime + .05)
-        #     if proc.poll() is not None:
-        #         complete = True
-        #         break
-        # if not complete:
-        #     proc.terminate()
-        # if self.verbose:
-        #     if self.partial_output:
-        #         self.gcode.respond_info(self.partial_output)
-        #         self.partial_output = ""
-        #     if complete:
-        #         msg = "Command {%s} finished\n" % (self.name)
-        #     else:
-        #         msg = "Command {%s} timed out" % (self.name)
-        #     self.gcode.respond_info(msg)
-        #     reactor.unregister_fd(hdl)
-        #     self.proc_fd = None
+        # No sync - just do it
+        lookahead_bgfunc(None)
 
 def load_config_prefix(config):
     return NeopixelUtility(config)
