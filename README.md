@@ -1,3 +1,12 @@
+Colours are defined using some syntax for the Colour library (https://github.com/vaab/colour).  
+Colours can be listed by their human, web compatible representation (e.g. red), or by rgb values (rgb=(1,0,0)). 
+Don't include any quote marks.
+
+https://www.w3.org/TR/css-color-3/#svg-color
+
+e.g. A custom pattern for red, white, and blue could be defined as CUSTOM=red|rgb=(1,1,1)|darkblue
+
+
 [update_manager neopixel_animations]
 type: git_repo
 path: ~/klipper_neopixel_utility

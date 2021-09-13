@@ -2,6 +2,8 @@ import logging
 from colour import Color
 import random
 import math
+import ast
+import sys
 import collections
 from neopixel import PrinterNeoPixel
 
@@ -38,7 +40,7 @@ class NeopixelUtility(PrinterNeoPixel):
 
     # Animations (+ Animation Specific Parameters) / Separate into animations and allocations?  What about Rider?
     # Random
-    # Rainbow
+    # Rainbow (repeat vs full range)
     # March  Direction, Speed, Steps
     # Pattern Pattern
     # Fade
@@ -110,7 +112,50 @@ class NeopixelUtility(PrinterNeoPixel):
         self._set_neopixels(1.,1.,1.,index=limits[1])
 
     def __pattern_custom(self, params, limits):
-        pass
+        custom = params.get('CUSTOM', '')
+        if custom == '':
+            self.gcode.respond_info(
+                'Please define  a pattern using CUSTOM=.  See the' \
+                ' documentation for details.  Defaulting to red|white|blue')
+            custom = 'red|white|blue'
+
+
+        colour_pattern = []
+        colour_pattern_strings = [x for x in custom.split('|')]
+        # Could probably do with some exception handling here
+        # Replace entry with white as a temporary?
+        for string in colour_pattern_strings:
+            try:
+                if string.strip().startswith('rgb') and ('=' in string):
+                    colour_pattern.append(Color(rgb=ast.literal_eval(string.split('=')[1])))
+                else:
+                    colour_pattern.append(Color(string))
+            except:
+                logging.debug('Exception: {0}'.format(sys.exc_info()[0]))
+                self.gcode.respond_info(
+                'Could not intepret {0} as a colour.  Please check' \
+                ' the documentation.  Replacing entry with white'.format(string))
+                colour_pattern.append(Color('white'))
+
+        pattern_length = len(colour_pattern)
+        if pattern_length == 0:
+            self.gcode.respond_info(
+                'Pattern is empty.  Defaulting to red|white|blue')
+            colour_pattern = [Color('red'), Color('white'), Color('blue')]
+            pattern_length = 3
+        chain_length = limits[1] - limits[0]
+        q, r = divmod(chain_length, pattern_length)
+
+        for i in range(q):
+            start = (i * pattern_length) + 1
+            for j in range(pattern_length):
+                self._set_neopixels(*colour_pattern[j].rgb, index=(start+j), transmit=False)
+
+        if r > 0:
+            start = (q * pattern_length) + 1
+            for i in range(r-1):
+                self._set_neopixels(*colour_pattern[i].rgb, index=(start+i), transmit=False)
+            self._set_neopixels(*colour_pattern[r].rgb, index=(start+r), transmit=True)
 
     def _gamma_lookup(self, number):
         return self.gamma_table[int(round((GAMMA_TABLE_STEPS-1) * number))]
