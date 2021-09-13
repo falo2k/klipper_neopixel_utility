@@ -122,8 +122,6 @@ class NeopixelUtility(PrinterNeoPixel):
 
         colour_pattern = []
         colour_pattern_strings = [x for x in custom.split('|')]
-        # Could probably do with some exception handling here
-        # Replace entry with white as a temporary?
         for string in colour_pattern_strings:
             try:
                 if string.strip().startswith('rgb') and ('=' in string):
@@ -143,19 +141,21 @@ class NeopixelUtility(PrinterNeoPixel):
                 'Pattern is empty.  Defaulting to red|white|blue')
             colour_pattern = [Color('red'), Color('white'), Color('blue')]
             pattern_length = 3
-        chain_length = limits[1] - limits[0]
+        chain_length = limits[1] - limits[0] + 1
         q, r = divmod(chain_length, pattern_length)
 
         for i in range(q):
-            start = (i * pattern_length) + 1
+            start = limits[0] + (i * pattern_length)
             for j in range(pattern_length):
-                self._set_neopixels(*colour_pattern[j].rgb, index=(start+j), transmit=False)
+                transmit = (i == q-1) and (r==0)
+                self._set_neopixels(*colour_pattern[j].rgb, index=(start+j), transmit=transmit)
 
         if r > 0:
-            start = (q * pattern_length) + 1
-            for i in range(r-1):
-                self._set_neopixels(*colour_pattern[i].rgb, index=(start+i), transmit=False)
-            self._set_neopixels(*colour_pattern[r].rgb, index=(start+r), transmit=True)
+            self.gcode.respond_info('q:{0} r:{1}'.format(q,r))
+            start = limits[0] + (q * pattern_length)
+            for i in range(r):
+                transmit = (i == r-1)
+                self._set_neopixels(*colour_pattern[i].rgb, index=(start+i), transmit=transmit)
 
     def _gamma_lookup(self, number):
         return self.gamma_table[int(round((GAMMA_TABLE_STEPS-1) * number))]
