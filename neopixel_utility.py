@@ -45,6 +45,9 @@ class NeopixelUtility(PrinterNeoPixel):
     # Pulse
     # Solid Colour
     # Rider Pattern
+    # Loading pattern (slowly fills up full lights - loadtofull?)
+    # Lightning
+    # Raindrops
 
     cmd_SET_LED_PATTERN_help = "Set a static pattern for the LEDs"
     def cmd_SET_LED_PATTERN(self, params):
@@ -53,27 +56,36 @@ class NeopixelUtility(PrinterNeoPixel):
         limits = map(int,params.get('RANGE', '1,{0}'.format(self.chain_count)).split(','))
 
         patterns = [
-            Pattern('Random', self.__pattern_random),
-            Pattern('Gradient', self.__pattern_gradient),
-            Pattern('Custom', self.__pattern_custom)
+            Pattern('random', self.__pattern_random),
+            Pattern('gradient', self.__pattern_gradient),
+            Pattern('custom', self.__pattern_custom)
         ]
 
-        pattern_list = list(zip(*patterns))[0]
+        pattern_list = map(str.lower,list(zip(*patterns))[0])
 
-        if pattern not in pattern_list:
-            pattern = 'Random'
+        if pattern.lower() not in pattern_list:
+            pattern = 'random'
             self.gcode.respond_info(
-                'Using Random pattern.  Please select a pattern using' \
+                'Using random pattern.  Please select a pattern using' \
                 ' PATTERN= and pass one of the following'\
                 ' patterns: {}'.format(', '.join(pattern_list)))
 
-        func = [x.function for x in patterns if x.name == pattern][0]
-        logging.debug(pattern)
-        logging.debug(func)
+        func = [x.function for x in patterns if x.name == pattern.lower()][0]
+        #logging.debug(pattern)
+        #logging.debug(func)
         func(params, limits)
 
     cmd_SET_LED_ANIMATION_help = "Start an animation"
     def cmd_SET_LED_ANIMATION(self, params):
+        self._set_neopixels(1.,1.,1.)
+        self._set_neopixels(.5,.5,.5)
+        logging.debug(self.get_status(None)['color_data'])
+        self._pause(0.05)
+        logging.debug(self.get_status(None)['color_data'])
+        self._pause(0.05)
+        logging.debug(self.get_status(None)['color_data'])
+        self._pause(0.05)
+        logging.debug(self.get_status(None)['color_data'])
         pass
 
     def __pattern_gradient(self, params, limits):
@@ -83,19 +95,13 @@ class NeopixelUtility(PrinterNeoPixel):
             for i in range(1,self.chain_count):
                 linear_gradient = float(i) / self.chain_count
                 c = Color(rgb=(linear_gradient,linear_gradient,linear_gradient))
-                if self.gamma_adjust:
-                    self._set_neopixels(*self._gamma_convert(c).rgb,index=i, transmit=False)
-                else:
-                    self._set_neopixels(*c.grb, index=i, transmit=False)
+                self._set_neopixels(*c.rgb, index=i, transmit=False)
             self._set_neopixels(1.,1.,1.,index=self.chain_count)
         else:
             for i in range(self.chain_count,1,-1):
                 linear_gradient = float(self.chain_count - i + 1) / self.chain_count
                 c = Color(rgb=(linear_gradient,linear_gradient,linear_gradient))
-                if self.gamma_adjust:
-                    self._set_neopixels(*self._gamma_convert(c).rgb,index=i, transmit=False)
-                else:
-                    self._set_neopixels(*c.grb, index=i, transmit=False)
+                self._set_neopixels(*c.grb, index=i, transmit=False)
             self._set_neopixels(1.,1.,1.,index=1)
 
     def __pattern_random(self, params, limits):
@@ -123,11 +129,15 @@ class NeopixelUtility(PrinterNeoPixel):
             eventtime = self.reactor.pause(eventtime + .05)
 
     # Copied relevant parts from neopixels SET_LED cmd
-    def _set_neopixels(self, red, green, blue, white=1., index=None, transmit=True):
+    def _set_neopixels(self, red, green, blue, white=0., index=None, transmit=True):
         def reactor_bgfunc(print_time):
             with self.mutex:
+                c = Color(rgb=(red,green,blue))
+                if self.gamma_adjust:
+                    c = self._gamma_convert(c)
+
                 #logging.info("Setting: {0} {1} {2}".format(red, green, blue))
-                self.update_color_data(red, green, blue, white, index)
+                self.update_color_data(*c.rgb, white=white, index=index)
                 if transmit:
                     self.send_data(print_time)
         def lookahead_bgfunc(print_time):
