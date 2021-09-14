@@ -10,6 +10,7 @@ from neopixel import PrinterNeoPixel
 
 GAMMA_TABLE_STEPS=100
 Pattern = collections.namedtuple('Pattern','name function')
+Animation = collections.namedtuple('Animation','name function')
 
 class NeopixelUtility(PrinterNeoPixel):
     def __init__(self, config):
@@ -37,6 +38,13 @@ class NeopixelUtility(PrinterNeoPixel):
     # - TERMINATE Length of time to run before terminating (for looping animations)
     # - RANGE Allow a subset of pixels to be set?
 
+    # RANGE=x,y: Select a subset of LEDs to apply effects to (index x to y inclusive)
+
+    # Patterns
+    # ========
+    # Random
+    # Gradient (DIRECTION: 1=*Ascending, 0=Descending)
+    # Custom (CUSTOM: Define the pattern to use)
 
     # Animations (+ Animation Specific Parameters) / Separate into animations and allocations?  What about Rider?
     # Random
@@ -47,7 +55,7 @@ class NeopixelUtility(PrinterNeoPixel):
     # Pulse
     # Solid Colour
     # Rider Pattern
-    # Loading pattern (slowly fills up full lights - loadtofull?)
+    # Loading pattern (slowly fills up full lights - loadtofull? - needs acceleration option as well?
     # Lightning
     # Raindrops
 
@@ -79,16 +87,89 @@ class NeopixelUtility(PrinterNeoPixel):
 
     cmd_SET_LED_ANIMATION_help = "Start an animation"
     def cmd_SET_LED_ANIMATION(self, params):
-        self._set_neopixels(1.,1.,1.)
-        self._set_neopixels(.5,.5,.5)
-        logging.debug(self.get_status(None)['color_data'])
-        self._pause(0.05)
-        logging.debug(self.get_status(None)['color_data'])
-        self._pause(0.05)
-        logging.debug(self.get_status(None)['color_data'])
-        self._pause(0.05)
-        logging.debug(self.get_status(None)['color_data'])
-        pass
+        animation = params.get('ANIMATION', 'Unknown')
+        limits = map(int,params.get('RANGE', '1,{0}'.format(self.chain_count)).split(','))
+
+        animations = [
+            Animation('march', self.__animation_march),
+            Animation('strobe', self.__animation_strobe)
+        ]
+
+        animation_list = map(str.lower,list(zip(*animations))[0])
+
+        if animation.lower() not in animation_list:
+            animation = 'march'
+            self.gcode.respond_info(
+                'Using march animation.  Please select an animation using' \
+                ' ANIMATION= and pass one of the following'\
+                ' animations: {}'.format(', '.join(animation_list)))
+
+        func = [x.function for x in animations if x.name == animation.lower()][0]
+        #logging.debug(animation)
+        #logging.debug(func)
+        func(params, limits)
+
+    # Split speed from the normal rate?  Make it a multiplier?  Or just document
+    def __animation_march(self, params, limits):
+        ascending = params.get_int('ASCENDING', 1)
+        speed = params.get_float('SPEED', 0.1)
+        duration = params.get_float('DURATION',5.)
+
+        state = self.__get_status_range(limits[0], limits[1])
+        chain_length = limits[1] - limits[0] + 1
+
+        eventtime = self.reactor.monotonic()
+        end  = eventtime + duration
+        while eventtime < end:
+            if ascending:
+                state = state[1:] + state[:1]
+            else:
+                state = state[-1:] + state[:-1]
+
+            for i in range(chain_length):
+                transmit = (i == chain_length - 1)
+                self._set_neopixels(*state[i].rgb, index=limits[0]+i, ignore_gamma=True, transmit=transmit)
+
+            self._pause(speed)
+            eventtime = self.reactor.monotonic()
+
+    def __animation_strobe(self, params, limits):
+        ascending = params.get_int('ASCENDING', 1)
+        speed = params.get_float('SPEED', 0.05)
+        duration = params.get_float('DURATION',5.)
+        colour_string = params.get('COLOUR','red')
+        try:
+            if colour_string.strip().startswith('rgb') and ('=' in colour_string):
+                colour = Color(rgb=ast.literal_eval(colour_string.split('=')[1]))
+            else:
+                colour = Color(colour_string)
+        except:
+            logging.debug('Exception: {0}'.format(sys.exc_info()[0]))
+            self.gcode.respond_info(
+            'Could not intepret {0} as a colour.  Please check' \
+            ' the documentation.  Replacing entry with red'.format(colour_string))
+            colour = Color('red')
+
+        chain_length = limits[1] - limits[0] + 1
+        state = [Color('black')]*chain_length
+
+        state[0] = colour
+
+        eventtime = self.reactor.monotonic()
+        end  = eventtime + duration
+
+        while eventtime < end:
+            if ascending:
+                state = state[1:] + state[:1]
+            else:
+                state = state[-1:] + state[:-1]
+
+            for i in range(chain_length):
+                transmit = (i == chain_length - 1)
+                self._set_neopixels(*state[i].rgb, index=limits[0]+i, transmit=transmit)
+
+            self._pause(speed)
+            eventtime = self.reactor.monotonic()
 
     def __pattern_gradient(self, params, limits):
         ascending = params.get_int('ASCENDING', 1)
@@ -173,12 +254,19 @@ class NeopixelUtility(PrinterNeoPixel):
         while eventtime < end:
             eventtime = self.reactor.pause(eventtime + .05)
 
+    def __get_status_range(self, start_index, end_index):
+        state = self.get_status(None)['color_data'][start_index - 1:end_index]
+        return self.__dicts_to_colors(state)
+
+    def __dicts_to_colors(self, dicts):
+        return [Color(rgb=(x['R'],x['G'],x['B'])) for x in dicts]
+
     # Copied relevant parts from neopixels SET_LED cmd
-    def _set_neopixels(self, red, green, blue, white=0., index=None, transmit=True):
+    def _set_neopixels(self, red, green, blue, white=0., index=None, transmit=True, ignore_gamma=False):
         def reactor_bgfunc(print_time):
             with self.mutex:
                 c = Color(rgb=(red,green,blue))
-                if self.gamma_adjust:
+                if self.gamma_adjust and not ignore_gamma:
                     c = self._gamma_convert(c)
 
                 #logging.info("Setting: {0} {1} {2}".format(red, green, blue))
