@@ -232,7 +232,6 @@ class NeopixelUtility(PrinterNeoPixel):
                 self._set_neopixels(*colour_pattern[j].rgb, index=(start+j), transmit=transmit)
 
         if r > 0:
-            self.gcode.respond_info('q:{0} r:{1}'.format(q,r))
             start = limits[0] + (q * pattern_length)
             for i in range(r):
                 transmit = (i == r-1)
