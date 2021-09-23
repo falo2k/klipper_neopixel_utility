@@ -7,6 +7,15 @@ This module acts as an upgrade for the existing neopixel module to allow easy se
 - Ability to animate LEDs using either the starting state of the LEDs or a specific pattern for that animation
 - Simple gamma correction to turn linear RGB values into something more aligned to a perceived linear brightness scale.
 
+## Configuration
+Configuration is the same as a standard `[neopixel]` block, with two optional configuration entries:
+```
+gamma: 2.7
+# Sets the value used for gamma correction.  Defaults to 2.7, which seems a reasonable value for neopixels
+gamma_adjust: True
+# Enable or disable the gamma adjustment of the new functions.  Defaults to True.
+```
+
 ## Commands
 ### Pattern Command
 The basic pattern command is as follows:
