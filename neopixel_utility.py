@@ -39,6 +39,7 @@ class NeopixelUtility(PrinterNeoPixel):
     # - RANGE Allow a subset of pixels to be set?
 
     # RANGE=x,y: Select a subset of LEDs to apply effects to (index x to y inclusive)
+    # Should do an out of bounds check on this
 
     # Patterns
     # ========
@@ -58,6 +59,7 @@ class NeopixelUtility(PrinterNeoPixel):
     # Loading pattern (slowly fills up full lights - loadtofull? - needs acceleration option as well?
     # Lightning
     # Raindrops
+
 
     cmd_SET_LED_PATTERN_help = "Set a static pattern for the LEDs"
     def cmd_SET_LED_PATTERN(self, params):
