@@ -282,3 +282,49 @@ class NeopixelUtility(PrinterNeoPixel):
 
 def load_config_prefix(config):
     return NeopixelUtility(config)
+
+## Utility functions for the Colour library
+def __limit(x):
+    return max(0., min(1., x))
+
+def __coloradd(self, other):
+    if type(other) == Color:
+        return Color(rgb=(__limit(self.red + other.red),__limit(self.green + other.green), __limit( self.blue + other.blue)))
+    elif type(other) in [float, int]:
+        return Color(rgb=(__limit(self.red + other),__limit(self.green + other), __limit( self.blue + other)))
+    else:
+        raise TypeError('unsupported operand type(s) for +: {0} and {1}'.format(type(self), type(other)))
+
+def __colorsub(self, other):
+    if type(other) == Color:
+        return Color(rgb=(__limit(self.red - other.red),__limit(self.green - other.green), __limit( self.blue - other.blue)))
+    elif type(other) in [float, int]:
+        return Color(rgb=(__limit(self.red - other),__limit(self.green - other), __limit( self.blue - other)))
+    else:
+        raise TypeError('unsupported operand type(s) for -: {0} and {1}'.format(type(self), type(other)))
+
+def __rcolorsub(self, other):
+    if type(other) in [float, int]:
+        return Color(rgb=(__limit(other - self.red),__limit(other - self.green), __limit( other - self.blue)))
+    else:
+        raise TypeError('unsupported operand type(s) for -: {0} and {1}'.format(type(self), type(other)))
+
+def __colormult(self, other):
+    if type(other) in [float, int]:
+        return Color(rgb=(__limit(other * self.red),__limit(other * self.green), __limit( other * self.blue)))
+    else:
+        raise TypeError('unsupported operand type(s) for *: {0} and {1}'.format(type(self), type(other)))
+
+def __colordiv(self, other):
+    if type(other) in [float, int]:
+        return Color(rgb=(__limit(self.red / other),__limit(self.green / other), __limit(self.blue / other)))
+    else:
+        raise TypeError('unsupported operand type(s) for *: {0} and {1}'.format(type(self), type(other)))
+
+Color.__add__ = __coloradd
+Color.__radd__ = __coloradd
+Color.__sub__ = __colorsub
+Color.__rsub__ = __rcolorsub
+Color.__mul__ = __colormult
+Color.__rmul__ = __colormult
+Color.__div__ = __colordiv

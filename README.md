@@ -72,7 +72,7 @@ Checkout the repo in the home directory and install using the following commands
 cd ~
 git clone https://github.com/falo2k/klipper_neopixel_utility.git
 source ~/klippy-env/bin/activate
-pip install Colour
+pip install -r ~/klipper_neopixel_utility/requirements.txt
 deactivate
 ```
 
