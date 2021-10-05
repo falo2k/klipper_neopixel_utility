@@ -1,16 +1,68 @@
+import sys
 import logging
-from colour import Color
 import random
 import math
 import ast
-import sys
 import collections
+import uuid
+from colour import Color
 from neopixel import PrinterNeoPixel
-
 
 GAMMA_TABLE_STEPS=100
 Pattern = collections.namedtuple('Pattern','name function')
 Animation = collections.namedtuple('Animation','name function')
+
+class AnimationManager:
+    def __init__(self, generator, start, end, step, duration, utility, ignore_gamma=False, id=None):
+        self.generator = generator
+        self.start = start
+        self.end = end
+        self.step = step
+        self.duration = duration
+        self.utility = utility
+        self.reactor = self.utility.reactor
+        self.ignore_gamma = ignore_gamma
+
+        if id:
+            self.id = id
+        else:
+            self.id = uuid.uuid1()
+
+        self.timer = None
+
+    def begin(self):
+        self.timer = self.reactor.register_timer(self.update)
+        self.endtime = self.reactor.monotonic() + self.duration
+        self.reactor.update_timer(self.timer, self.reactor.NOW)
+
+    def pause(self):
+        pass
+
+    def resume(self):
+        pass
+
+    def update(self, eventtime):
+
+        if eventtime > self.endtime:
+            self.cleanup()
+            return self.reactor.NEVER
+        else:
+            state = next(self.generator)
+            #logging.debug('Update event for animation {0} to state {1} ....'.format(self.id, state[:4]))
+            self.utility.set_range_colours(self.start, self.end, state, self.ignore_gamma)
+            #self.reactor.update_timer(self.sample_timer, self.reactor.monotonic() + self.step)
+            return self.reactor.monotonic() + self.step
+
+    def cleanup(self):
+        # Get utility to remove this generator from the list
+        # Unregister timer from reactor
+        logging.debug('Completed running animation {0}.  Dropping animation from queue.'.format(self.id))
+        # Cannot remove timer if this is within update as will be inside reactor for loop over timer list
+        # May need to make cleanup a periodic activity for the utility - either polled or done before insertion of new
+        # animations to the queue
+        # unregister_timer(self.timer)
+        self.utility.remove_animation(self)
+
 
 class NeopixelUtility(PrinterNeoPixel):
     def __init__(self, config):
@@ -22,6 +74,7 @@ class NeopixelUtility(PrinterNeoPixel):
         self.gamma = config.get('gamma', 2.7)
         self.gamma_adjust = config.getboolean('gamma_adjust', True)
         self.gamma_table = self._gamma_table(GAMMA_TABLE_STEPS, self.gamma)
+        self.animations = []
 
         self.gcode.register_mux_command(
             "SET_LED_PATTERN", "LED", name,
@@ -79,7 +132,7 @@ class NeopixelUtility(PrinterNeoPixel):
             pattern = 'random'
             self.gcode.respond_info(
                 'Using random pattern.  Please select a pattern using' \
-                ' PATTERN= and pass one of the following'\
+                ' PATTERN= and pass one of the following' \
                 ' patterns: {}'.format(', '.join(pattern_list)))
 
         func = [x.function for x in patterns if x.name == pattern.lower()][0]
@@ -118,22 +171,26 @@ class NeopixelUtility(PrinterNeoPixel):
         duration = params.get_float('DURATION',5.)
 
         state = self.__get_status_range(limits[0], limits[1])
-        chain_length = limits[1] - limits[0] + 1
+        start = limits[0]
+        end = limits[1]
+        #chain_length = limits[1] - limits[0] + 1
 
-        eventtime = self.reactor.monotonic()
-        end  = eventtime + duration
-        while eventtime < end:
+        state_generator = self.__animation_march2_generator(state, ascending)
+        animation = AnimationManager(generator=state_generator, start=start,
+                        end=end, step=speed, duration=duration, utility=self,
+                        ignore_gamma=True)
+
+        self.animations.append(animation)
+        animation.begin()
+
+    def __animation_march2_generator(self, state, ascending):
+        while True:
             if ascending:
                 state = state[1:] + state[:1]
             else:
                 state = state[-1:] + state[:-1]
 
-            for i in range(chain_length):
-                transmit = (i == chain_length - 1)
-                self._set_neopixels(*state[i].rgb, index=limits[0]+i, ignore_gamma=True, transmit=transmit)
-
-            self._pause(speed)
-            eventtime = self.reactor.monotonic()
+            yield state
 
     def __animation_strobe(self, params, limits):
         ascending = params.get_int('ASCENDING', 1)
@@ -261,6 +318,36 @@ class NeopixelUtility(PrinterNeoPixel):
 
     def __dicts_to_colors(self, dicts):
         return [Color(rgb=(x['R'],x['G'],x['B'])) for x in dicts]
+
+    def set_range_colours(self, start, end, colours, ignore_gamma=False):
+        def reactor_bgfunc(print_time):
+            with self.mutex:
+                for i in range(end - start + 1):
+                    index = start + i
+                    c = colours[i]
+
+                    if self.gamma_adjust and not ignore_gamma:
+                        c = self._gamma_convert(c)
+
+                    self.update_color_data(*c.rgb, white=0., index=index)
+                    if index == end:
+                        self.send_data(print_time)
+
+        self.reactor.register_callback(lambda et: reactor_bgfunc(None))
+
+    def get_animation_by_id(self, id):
+        for animation in self.animations:
+            if animation == id:
+                return animation
+
+        return None
+
+    def remove_animation(self, animation):
+        index = self.animations.index(animation)
+        if index:
+            self.animations.pop(index)
+        else:
+            logging.debug("Could not find animation in queue to remove it: {0}".format(animation.id))
 
     # Copied relevant parts from neopixels SET_LED cmd
     def _set_neopixels(self, red, green, blue, white=0., index=None, transmit=True, ignore_gamma=False):
