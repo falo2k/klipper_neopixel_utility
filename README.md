@@ -2,8 +2,6 @@
 
 This module acts as an upgrade for the existing neopixel module to allow easy setting of patterns and animations in gcode.  To use the module in Klipper, replace your existing `[neopixel my_neopixels]` entry with `[neopixel_utiliy my_neopixels]`.  Existing neopixel commands like `SET_LED` will work as before.
 
-Note that curently the animations block for their duration, so should not be used mid-print.  I'll be changing that on next push, just haven't had time.
-
 ## Features
 - Ability to select a pattern of lights either from a predefined pattern, or by specifying a series of colours to repeat
 - Ability to animate LEDs using either the starting state of the LEDs or a specific pattern for that animation
