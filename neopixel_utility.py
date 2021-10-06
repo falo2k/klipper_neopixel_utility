@@ -22,6 +22,7 @@ class AnimationManager:
         self.utility = utility
         self.reactor = self.utility.reactor
         self.ignore_gamma = ignore_gamma
+        self.frame_counter = 0
 
         if id:
             self.id = id
@@ -42,16 +43,21 @@ class AnimationManager:
         pass
 
     def update(self, eventtime):
+        self.frame_counter += 1
 
         if eventtime > self.endtime:
             self.cleanup()
             return self.reactor.NEVER
         else:
+            next_event = self.reactor.monotonic() + self.step
             state = next(self.generator)
-            #logging.debug('Update event for animation {0} to state {1} ....'.format(self.id, state[:4]))
+            logging.debug('[{frame},{targettime},{eventtime},{nexttime}] Update event for animation {id}' \
+                    ' to state {state} ....'.format(id=self.id, state=state[:4],
+                    frame=self.frame_counter, targettime = self.timer.waketime,
+                    eventtime=eventtime, nexttime=next_event))
             self.utility.set_range_colours(self.start, self.end, state, self.ignore_gamma)
             #self.reactor.update_timer(self.sample_timer, self.reactor.monotonic() + self.step)
-            return self.reactor.monotonic() + self.step
+            return next_event
 
     def cleanup(self):
         # Get utility to remove this generator from the list
@@ -175,7 +181,7 @@ class NeopixelUtility(PrinterNeoPixel):
         end = limits[1]
         #chain_length = limits[1] - limits[0] + 1
 
-        state_generator = self.__animation_march2_generator(state, ascending)
+        state_generator = self.__animation_march_generator(state, ascending)
         animation = AnimationManager(generator=state_generator, start=start,
                         end=end, step=speed, duration=duration, utility=self,
                         ignore_gamma=True)
@@ -183,7 +189,7 @@ class NeopixelUtility(PrinterNeoPixel):
         self.animations.append(animation)
         animation.begin()
 
-    def __animation_march2_generator(self, state, ascending):
+    def __animation_march_generator(self, state, ascending):
         while True:
             if ascending:
                 state = state[1:] + state[:1]
@@ -209,26 +215,30 @@ class NeopixelUtility(PrinterNeoPixel):
             ' the documentation.  Replacing entry with red'.format(colour_string))
             colour = Color('red')
 
-        chain_length = limits[1] - limits[0] + 1
-        state = [Color('black')]*chain_length
+        start = limits[0]
+        end = limits[1]
 
+        state_generator = self.__animation_strobe_generator(end - start + 1, colour, ascending)
+        animation = AnimationManager(generator=state_generator, start=start,
+                        end=end, step=speed, duration=duration, utility=self,
+                        ignore_gamma=True)
+
+        self.animations.append(animation)
+        animation.begin()
+
+    def __animation_strobe_generator(self, length, colour, ascending):
+        state = [Color('black')] * length
         state[0] = colour
 
-        eventtime = self.reactor.monotonic()
-        end  = eventtime + duration
+        yield state
 
-        while eventtime < end:
+        while True:
             if ascending:
                 state = state[1:] + state[:1]
             else:
                 state = state[-1:] + state[:-1]
 
-            for i in range(chain_length):
-                transmit = (i == chain_length - 1)
-                self._set_neopixels(*state[i].rgb, index=limits[0]+i, transmit=transmit)
-
-            self._pause(speed)
-            eventtime = self.reactor.monotonic()
+            yield state
 
     def __pattern_gradient(self, params, limits):
         ascending = params.get_int('ASCENDING', 1)
@@ -320,20 +330,16 @@ class NeopixelUtility(PrinterNeoPixel):
         return [Color(rgb=(x['R'],x['G'],x['B'])) for x in dicts]
 
     def set_range_colours(self, start, end, colours, ignore_gamma=False):
-        def reactor_bgfunc(print_time):
-            with self.mutex:
-                for i in range(end - start + 1):
-                    index = start + i
-                    c = colours[i]
+        for i in range(end - start + 1):
+            index = start + i
+            c = colours[i]
 
-                    if self.gamma_adjust and not ignore_gamma:
-                        c = self._gamma_convert(c)
+            if self.gamma_adjust and not ignore_gamma:
+                c = self._gamma_convert(c)
 
-                    self.update_color_data(*c.rgb, white=0., index=index)
-                    if index == end:
-                        self.send_data(print_time)
-
-        self.reactor.register_callback(lambda et: reactor_bgfunc(None))
+            self.update_color_data(*c.rgb, white=0., index=index)
+            if index == end:
+                self.send_data()
 
     def get_animation_by_id(self, id):
         for animation in self.animations:
